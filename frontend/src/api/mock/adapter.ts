@@ -440,7 +440,11 @@ export async function mockRequest(req: MockRequest): Promise<MockResponse> {
 
 export const mockAdapter: AxiosAdapter = async (config) => {
   const headers: Record<string, string> = {};
-  AxiosHeaders.from(config.headers as AxiosHeaders).forEach((v: unknown, k: string) => (headers[k] = String(v)));
+  // AxiosHeaders has no forEach at runtime; normalise via toJSON() (lower-cased keys, plain values).
+  const raw = AxiosHeaders.from(config.headers as AxiosHeaders).toJSON() as Record<string, unknown>;
+  for (const [k, v] of Object.entries(raw)) {
+    if (v !== undefined && v !== null && v !== false) headers[k.toLowerCase()] = String(v);
+  }
   const res = await mockRequest({ method: config.method ?? 'get', url: `${config.baseURL ?? ''}${config.url ?? ''}`, params: config.params, data: config.data, headers });
   const response: AxiosResponse = { data: res.data, status: res.status, statusText: String(res.status), headers: res.headers, config, request: {} };
   if (res.status >= 400) throw new AxiosError(`Request failed with status code ${res.status}`, AxiosError.ERR_BAD_RESPONSE, config, {}, response);
