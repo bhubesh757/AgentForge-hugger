@@ -1,0 +1,5 @@
+# Worker-only dependencies (installed on top of backend deps in the worker image)
+docker>=7.1,<8
+# Optional durable LangGraph checkpoints (LANGGRAPH_CHECKPOINTER=postgres)
+# langgraph-checkpoint-postgres>=2.0
+# psycopg[binary]>=3.2

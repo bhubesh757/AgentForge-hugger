@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: agentforge
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # FastAPI backend exposes Prometheus text format at /metrics (API_CONTRACTS §12)
+  - job_name: agentforge-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: backend

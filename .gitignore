@@ -1,0 +1,40 @@
+# Dependencies / builds
+node_modules/
+dist/
+build/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pnpm-store/
+
+# Test / tool caches
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+playwright-report/
+test-results/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Terraform (future)
+.terraform/
+*.tfstate
+*.tfstate.*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log

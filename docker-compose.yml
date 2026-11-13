@@ -1,0 +1,155 @@
+# AgentForge AI — local stack (core).
+#   cp .env.example .env && make gen-keys   # once
+#   docker compose up -d --build            # postgres, redis, migrate, backend, frontend
+# Optional overlays / profiles:
+#   -f docker-compose.kafka.yml --profile kafka --profile workers   (Kafka + workers, EXECUTION_DISPATCH=kafka)
+#   -f docker-compose.monitoring.yml --profile monitoring           (Prometheus, Grafana, Loki)
+# No secrets live in this file: every value is interpolated from .env (or a safe dev default).
+name: agentforge
+
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+  # Core stack has no Kafka, so executions run inline in the API process.
+  # docker-compose.kafka.yml overrides this to "kafka".
+  EXECUTION_DISPATCH: ${EXECUTION_DISPATCH:-inline}
+  JWT_SECRET: ${JWT_SECRET:-}
+  ACCESS_TOKEN_TTL_SECONDS: ${ACCESS_TOKEN_TTL_SECONDS:-900}
+  REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+  LLM_MOCK_MODE: ${LLM_MOCK_MODE:-false}
+  SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentforge-sandbox:1.0.1}
+  SANDBOX_TIMEOUT_SECONDS: ${SANDBOX_TIMEOUT_SECONDS:-30}
+  SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-256}
+  SANDBOX_CPUS: ${SANDBOX_CPUS:-0.5}
+  SANDBOX_ALLOWED_PACKAGES: ${SANDBOX_ALLOWED_PACKAGES:-requests,httpx,pydantic,python-dateutil}
+  SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agentforge}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentforge}
+      POSTGRES_DB: ${POSTGRES_DB:-agentforge}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "200mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256m }
+    logging: *default-logging
+
+  migrate:
+    image: ${REGISTRY:-agentforge}/agentforge-ai-backend:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512m }
+    logging: *default-logging
+
+  backend:
+    image: ${REGISTRY:-agentforge}/agentforge-ai-backend:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment: *app-env
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1.5", memory: 1g }
+    logging: *default-logging
+
+  frontend:
+    image: ${REGISTRY:-agentforge}/agentforge-ai-frontend:${IMAGE_TAG:-local}
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000/api/v1}
+        VITE_DEMO_MODE: ${VITE_DEMO_MODE:-false}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+        VITE_ROUTER_MODE: ${VITE_ROUTER_MODE:-browser}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:8080"
+    depends_on:
+      backend:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128m }
+    logging: *default-logging
+
+volumes:
+  postgres-data:
+  redis-data:

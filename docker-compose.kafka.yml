@@ -1,0 +1,137 @@
+# AgentForge AI — Kafka (KRaft, single node) + workers overlay.
+#   docker compose -f docker-compose.yml -f docker-compose.kafka.yml --profile kafka --profile workers up -d --build
+# Including this file switches the backend to EXECUTION_DISPATCH=kafka, so always enable --profile kafka with it.
+# Topic creation script is owned by the Runtime team: infrastructure/docker/kafka/create-topics.sh
+
+x-worker: &worker
+  image: ${REGISTRY:-agentforge}/agentforge-ai-worker:${IMAGE_TAG:-local}
+  build:
+    context: .
+    dockerfile: workers/Dockerfile
+  restart: unless-stopped
+  profiles: ["workers"]
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+    kafka-init:
+      condition: service_completed_successfully
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+x-worker-env: &worker-env
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentforge:agentforge@postgres:5432/agentforge}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+  CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:-}
+  JWT_SECRET: ${JWT_SECRET:-}
+  LLM_MOCK_MODE: ${LLM_MOCK_MODE:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+  SANDBOX_IMAGE: ${SANDBOX_IMAGE:-agentforge-sandbox:1.0.1}
+  SANDBOX_TIMEOUT_SECONDS: ${SANDBOX_TIMEOUT_SECONDS:-30}
+  SANDBOX_MEMORY_MB: ${SANDBOX_MEMORY_MB:-256}
+  SANDBOX_CPUS: ${SANDBOX_CPUS:-0.5}
+  SANDBOX_ALLOWED_PACKAGES: ${SANDBOX_ALLOWED_PACKAGES:-requests,httpx,pydantic,python-dateutil}
+  SANDBOX_NETWORK: ${SANDBOX_NETWORK:-none}
+
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    profiles: ["kafka", "workers"]
+    hostname: kafka
+    ports:
+      - "${KAFKA_HOST_PORT:-29092}:29092"   # host access: localhost:29092
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 72
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1g }
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    profiles: ["kafka", "workers"]
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BIN: /opt/kafka/bin
+    volumes:
+      - ./infrastructure/docker/kafka/create-topics.sh:/scripts/create-topics.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/create-topics.sh"]
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 512m }
+
+  backend:
+    environment:
+      EXECUTION_DISPATCH: kafka
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+
+  agent-worker:
+    <<: *worker
+    command: ["python", "-m", "workers.agent_worker"]
+    environment: *worker-env
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768m }
+
+  workflow-worker:
+    <<: *worker
+    command: ["python", "-m", "workers.workflow_worker"]
+    environment: *worker-env
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768m }
+
+  # TRUSTED COMPONENT: tool-worker is the ONLY service with the Docker socket.
+  # It launches short-lived sandbox containers (SANDBOX_IMAGE, network=none, mem/cpu caps).
+  # Sandbox containers themselves NEVER get the socket mounted.
+  tool-worker:
+    <<: *worker
+    command: ["python", "-m", "workers.tool_worker"]
+    environment: *worker-env
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"   # group owning /var/run/docker.sock inside the Docker VM
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512m }
+
+volumes:
+  kafka-data:

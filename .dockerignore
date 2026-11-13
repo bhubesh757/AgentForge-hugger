@@ -1,0 +1,27 @@
+# Root build context is used by backend/Dockerfile and workers/Dockerfile.
+# Keep it small: only backend/ and workers/ are needed.
+.git
+.github
+.venv
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/.coverage
+**/coverage
+**/htmlcov
+**/node_modules
+frontend
+docs
+infrastructure
+postman
+sandbox
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+docker-compose*.yml
+Makefile

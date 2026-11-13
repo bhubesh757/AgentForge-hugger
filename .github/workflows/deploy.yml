@@ -1,0 +1,62 @@
+# Deploys ONLY the static frontend to GitHub Pages (demo mode by default).
+# FastAPI, Postgres, Redis and Kafka are NOT hosted by GitHub Pages.
+name: deploy-pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["frontend/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: actions/configure-pages@v5
+      - run: pnpm install --frozen-lockfile
+      - name: Build static site
+        run: pnpm build
+        env:
+          VITE_DEMO_MODE: ${{ vars.VITE_DEMO_MODE || 'true' }}
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || '' }}
+          VITE_ROUTER_MODE: hash
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+      - name: SPA 404 fallback + disable Jekyll
+        run: |
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
