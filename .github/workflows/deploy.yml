@@ -1,5 +1,7 @@
 # Deploys ONLY the static frontend to GitHub Pages (demo mode by default).
 # FastAPI, Postgres, Redis and Kafka are NOT hosted by GitHub Pages.
+# Prerequisite: repo Settings > Pages > Build and deployment > Source = "GitHub Actions".
+# Live URL: https://<owner>.github.io/<repo>/  (VITE_BASE_PATH is derived from the repo name).
 name: deploy-pages
 
 on:
