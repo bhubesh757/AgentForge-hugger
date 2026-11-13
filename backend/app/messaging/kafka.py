@@ -52,9 +52,15 @@ class EventEnvelope(BaseModel):
 
     def derive(self, event_type: str, payload: dict | None = None) -> EventEnvelope:
         """New envelope (new event_id) for a follow-up lifecycle event of the same execution."""
-        return self.model_copy(update={"event_id": uuid.uuid4(), "event_type": event_type,
-                                       "timestamp": datetime.now(UTC), "attempt": 1,
-                                       "payload": payload or {}})
+        return self.model_copy(
+            update={
+                "event_id": uuid.uuid4(),
+                "event_type": event_type,
+                "timestamp": datetime.now(UTC),
+                "attempt": 1,
+                "payload": payload or {},
+            }
+        )
 
 
 def get_setting(name: str, default: Any = None) -> Any:
@@ -66,7 +72,7 @@ def get_setting(name: str, default: Any = None) -> Any:
             if hasattr(settings, attr):
                 val = getattr(settings, attr)
                 return val.get_secret_value() if hasattr(val, "get_secret_value") else val
-    except Exception:  # noqa: BLE001 - config import must never break messaging
+    except Exception:  # noqa: BLE001, S110 - config import must never break messaging
         pass
     return os.getenv(name, default)
 

@@ -33,15 +33,21 @@ class FakeCtx:
 
 
 def graph_def(expr):
-    return {"nodes": [
-        {"id": "start", "type": "start"},
-        {"id": "llm", "type": "llm", "data": {"config": {"prompt_template": "classify {{input}}"}}},
-        {"id": "cond", "type": "condition", "data": {"config": {"expression": expr}}},
-        {"id": "hi", "type": "end", "data": {"config": {"output_key": "high"}}},
-        {"id": "lo", "type": "end"}],
-        "edges": [{"id": "1", "source": "start", "target": "llm"}, {"id": "2", "source": "llm", "target": "cond"},
-                  {"id": "3", "source": "cond", "target": "hi", "source_handle": "true"},
-                  {"id": "4", "source": "cond", "target": "lo", "source_handle": "false"}]}
+    return {
+        "nodes": [
+            {"id": "start", "type": "start"},
+            {"id": "llm", "type": "llm", "data": {"config": {"prompt_template": "classify {{input}}"}}},
+            {"id": "cond", "type": "condition", "data": {"config": {"expression": expr}}},
+            {"id": "hi", "type": "end", "data": {"config": {"output_key": "high"}}},
+            {"id": "lo", "type": "end"},
+        ],
+        "edges": [
+            {"id": "1", "source": "start", "target": "llm"},
+            {"id": "2", "source": "llm", "target": "cond"},
+            {"id": "3", "source": "cond", "target": "hi", "source_handle": "true"},
+            {"id": "4", "source": "cond", "target": "lo", "source_handle": "false"},
+        ],
+    }
 
 
 @pytest.mark.parametrize("severity,branch", [("high", "hi"), ("low", "lo")])
@@ -59,16 +65,28 @@ async def test_compiled_graph_end_to_end(severity, branch):
 
 
 def test_ssrf_block():
-    for url in ("http://127.0.0.1/x", "http://169.254.169.254/latest", "file:///etc/passwd", "http://10.0.0.1"):
+    for url in (
+        "http://127.0.0.1/x",
+        "http://169.254.169.254/latest",
+        "file:///etc/passwd",
+        "http://10.0.0.1",
+    ):
         with pytest.raises(ValueError):
             check_url_allowed(url, allow_private=False)
     check_url_allowed("http://127.0.0.1/x", allow_private=True)
 
 
 def env_dict(**kw):
-    base = dict(event_type="agent.execution.requested", organization_id=str(uuid.uuid4()),
-                execution_id=str(uuid.uuid4()), correlation_id=str(uuid.uuid4()), resource_type="agent",
-                resource_id=str(uuid.uuid4()), resource_version=1, kind="agent")
+    base = dict(
+        event_type="agent.execution.requested",
+        organization_id=str(uuid.uuid4()),
+        execution_id=str(uuid.uuid4()),
+        correlation_id=str(uuid.uuid4()),
+        resource_type="agent",
+        resource_id=str(uuid.uuid4()),
+        resource_version=1,
+        kind="agent",
+    )
     base.update(kw)
     return base
 
@@ -77,8 +95,14 @@ def test_envelope_roundtrip_and_validation():
     env = EventEnvelope.model_validate(env_dict())
     again = EventEnvelope.from_bytes(env.to_bytes())
     assert again == env and env.key == str(env.execution_id).encode()
-    for bad in (dict(kind="nope"), dict(resource_type="x"), dict(schema_version="2.0"), dict(extra=1),
-                dict(execution_id="not-a-uuid"), dict(attempt=0)):
+    for bad in (
+        dict(kind="nope"),
+        dict(resource_type="x"),
+        dict(schema_version="2.0"),
+        dict(extra=1),
+        dict(execution_id="not-a-uuid"),
+        dict(attempt=0),
+    ):
         with pytest.raises(ValueError):
             EventEnvelope.model_validate(env_dict(**bad))
     assert request_topic_for("chat", "workflow") == "workflow.execution.requested"
@@ -110,8 +134,15 @@ def make_consumer(handler):
     async def sleep(s):
         sleeps.append(s)
 
-    c = BaseConsumer(["agent.execution.requested"], "g", handler, consumer=object(), producer=FakeProducer(),
-                     redis=FakeRedis(), sleep=sleep)
+    c = BaseConsumer(
+        ["agent.execution.requested"],
+        "g",
+        handler,
+        consumer=object(),
+        producer=FakeProducer(),
+        redis=FakeRedis(),
+        sleep=sleep,
+    )
     return c, sleeps
 
 

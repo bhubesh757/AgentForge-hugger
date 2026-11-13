@@ -92,7 +92,9 @@ NodeFn = Callable[[WorkflowState], Awaitable[dict]]
 # ---------------------------------------------------------------- helpers
 
 
-async def stream_llm(ctx: RuntimeContext, model: Any, messages: list[BaseMessage], node_id: str | None) -> str:
+async def stream_llm(
+    ctx: RuntimeContext, model: Any, messages: list[BaseMessage], node_id: str | None
+) -> str:
     """Stream tokens from a LangChain chat model, emitting batched ``llm.token`` events."""
     parts: list[str] = []
     buf = ""
@@ -145,7 +147,7 @@ async def run_agent(ctx: RuntimeContext, spec: AgentSpec, user_input: str, node_
     if spec.temperature is not None:
         try:
             model = model.bind(temperature=spec.temperature)
-        except Exception:  # noqa: BLE001 - some fakes/models don't support bind
+        except Exception:  # noqa: BLE001, S110 - some fakes/models do not support bind
             pass
     messages: list[BaseMessage] = []
     if spec.instructions:
@@ -156,8 +158,14 @@ async def run_agent(ctx: RuntimeContext, spec: AgentSpec, user_input: str, node_
 
     by_name = {t["name"]: t for t in spec.tools}
     tool_defs = [
-        {"type": "function", "function": {"name": t["name"], "description": t.get("description", ""),
-                                          "parameters": t.get("input_schema") or {"type": "object"}}}
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema") or {"type": "object"},
+            },
+        }
         for t in spec.tools
     ]
     try:
@@ -185,7 +193,9 @@ async def run_agent(ctx: RuntimeContext, spec: AgentSpec, user_input: str, node_
                     result = await ctx.invoke_tool(tool["id"], tool.get("version"), call.get("args") or {})
                 except Exception as exc:  # noqa: BLE001 - surface tool errors to the model
                     result = {"error": str(exc)}
-            messages.append(ToolMessage(content=json.dumps(result, default=str), tool_call_id=call.get("id") or ""))
+            messages.append(
+                ToolMessage(content=json.dumps(result, default=str), tool_call_id=call.get("id") or "")
+            )
     raise NodeExecutionError(node_id or "agent", "agent exceeded maximum tool-calling iterations")
 
 
@@ -203,8 +213,14 @@ def check_url_allowed(url: str, allow_private: bool) -> None:
         raise ValueError(f"cannot resolve host {host}") from exc
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
-        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
-                or ip.is_multicast or ip.is_unspecified):
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
             raise ValueError(f"destination {host} resolves to a non-public address")
 
 
@@ -236,7 +252,7 @@ def build_node_fn(node, ctx: RuntimeContext, http_client_factory=None) -> NodeFn
             if cfg.temperature is not None:
                 try:
                     model = model.bind(temperature=cfg.temperature)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001, S110 - model may not support bind
                     pass
             prompt = render_template(cfg.prompt_template, dict(state))
             return maybe_json(await stream_llm(ctx, model, [HumanMessage(content=prompt)], nid))
@@ -247,7 +263,11 @@ def build_node_fn(node, ctx: RuntimeContext, http_client_factory=None) -> NodeFn
             return maybe_json(text)
         if ntype == "tool":
             cfg = _cfg(node, ToolNodeConfig)
-            payload = render_value(cfg.input_mapping, dict(state)) if cfg.input_mapping else state.get("last_output")
+            payload = (
+                render_value(cfg.input_mapping, dict(state))
+                if cfg.input_mapping
+                else state.get("last_output")
+            )
             return await ctx.invoke_tool(cfg.tool_id, cfg.tool_version, payload)
         if ntype == "rag":
             cfg = _cfg(node, RAGNodeConfig)
@@ -272,8 +292,9 @@ def build_node_fn(node, ctx: RuntimeContext, http_client_factory=None) -> NodeFn
                 raise
             raise NodeExecutionError(nid, f"{ntype} node failed: {exc}") from exc
         duration_ms = int((time.monotonic() - t0) * 1000)
-        await ctx.emit("node.completed", {"type": ntype, "duration_ms": duration_ms,
-                                          "output": _preview(result)}, nid)
+        await ctx.emit(
+            "node.completed", {"type": ntype, "duration_ms": duration_ms, "output": _preview(result)}, nid
+        )
         update: dict[str, Any] = {"outputs": {nid: result}, "trace": [nid]}
         if ntype != "condition":
             update["last_output"] = result
@@ -302,7 +323,9 @@ async def _run_api(cfg: APINodeConfig, state: WorkflowState, ctx: RuntimeContext
     body = render_template(cfg.body_template, st) if cfg.body_template else None
     factory = http_client_factory or (lambda: httpx.AsyncClient(follow_redirects=False))
     async with factory() as client:
-        resp = await client.request(cfg.method, url, headers=headers, content=body, timeout=cfg.timeout_seconds)
+        resp = await client.request(
+            cfg.method, url, headers=headers, content=body, timeout=cfg.timeout_seconds
+        )
     try:
         data: Any = resp.json()
     except ValueError:
@@ -320,10 +343,15 @@ def graph_node_name(node_id: str) -> str:
     return "node_" + node_id.replace(":", "_").replace("|", "_")
 
 
-def compile_workflow(definition: dict | WorkflowDefinition, ctx: RuntimeContext, *, checkpointer=None,
-                     http_client_factory=None):
+def compile_workflow(
+    definition: dict | WorkflowDefinition, ctx: RuntimeContext, *, checkpointer=None, http_client_factory=None
+):
     """Build and compile the LangGraph graph. Definition must already be valid."""
-    wf = definition if isinstance(definition, WorkflowDefinition) else WorkflowDefinition.model_validate(definition)
+    wf = (
+        definition
+        if isinstance(definition, WorkflowDefinition)
+        else WorkflowDefinition.model_validate(definition)
+    )
     graph = StateGraph(WorkflowState)
     nodes = {n.id: n for n in wf.nodes}
     for n in wf.nodes:
@@ -345,8 +373,11 @@ def compile_workflow(definition: dict | WorkflowDefinition, ctx: RuntimeContext,
             def route(state: WorkflowState, _nid: str = nid) -> str:
                 return "true" if state["outputs"].get(_nid) else "false"
 
-            graph.add_conditional_edges(graph_node_name(nid), route, {
-                "true": graph_node_name(mapping["true"]), "false": graph_node_name(mapping["false"])})
+            graph.add_conditional_edges(
+                graph_node_name(nid),
+                route,
+                {"true": graph_node_name(mapping["true"]), "false": graph_node_name(mapping["false"])},
+            )
         else:
             for e in outs:
                 graph.add_edge(graph_node_name(nid), graph_node_name(e.target))
@@ -359,11 +390,18 @@ def single_agent_definition(agent_id: str, version: int | None) -> dict:
         "schema_version": "1.0",
         "nodes": [
             {"id": "start", "type": "start", "data": {"label": "Start", "config": {}}},
-            {"id": "agent", "type": "agent",
-             "data": {"label": "Agent", "config": {"agent_id": agent_id, "agent_version": version,
-                                                   "input_template": "{{input}}"}}},
+            {
+                "id": "agent",
+                "type": "agent",
+                "data": {
+                    "label": "Agent",
+                    "config": {"agent_id": agent_id, "agent_version": version, "input_template": "{{input}}"},
+                },
+            },
             {"id": "end", "type": "end", "data": {"label": "End", "config": {}}},
         ],
-        "edges": [{"id": "e1", "source": "start", "target": "agent"},
-                  {"id": "e2", "source": "agent", "target": "end"}],
+        "edges": [
+            {"id": "e1", "source": "start", "target": "agent"},
+            {"id": "e2", "source": "agent", "target": "end"},
+        ],
     }

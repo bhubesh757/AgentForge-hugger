@@ -19,7 +19,9 @@ def get_redis():
     if _client is None:
         import redis.asyncio as aioredis
 
-        _client = aioredis.from_url(str(get_setting("REDIS_URL", "redis://redis:6379/0")), decode_responses=True)
+        _client = aioredis.from_url(
+            str(get_setting("REDIS_URL", "redis://redis:6379/0")), decode_responses=True
+        )
     return _client
 
 

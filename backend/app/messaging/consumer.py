@@ -111,8 +111,11 @@ class BaseConsumer:
             return "dlq"
 
         structlog.contextvars.bind_contextvars(
-            correlation_id=str(env.correlation_id), execution_id=str(env.execution_id),
-            event_id=str(env.event_id), event_type=env.event_type)
+            correlation_id=str(env.correlation_id),
+            execution_id=str(env.execution_id),
+            event_id=str(env.event_id),
+            event_type=env.event_type,
+        )
         done_key = EVENT_DONE_KEY.format(event_id=env.event_id)
         try:
             if await self.redis.exists(done_key):
@@ -158,8 +161,14 @@ class BaseConsumer:
 
     async def _dead_letter(self, topic: str, value: bytes, error: str, key: bytes | None) -> None:
         self.dead_lettered += 1
-        body = dumps({"original_topic": topic, "error": error[:2000], "group_id": self.group_id,
-                      "message": value.decode("utf-8", "replace") if isinstance(value, bytes) else value})
+        body = dumps(
+            {
+                "original_topic": topic,
+                "error": error[:2000],
+                "group_id": self.group_id,
+                "message": value.decode("utf-8", "replace") if isinstance(value, bytes) else value,
+            }
+        )
         try:
             await self._producer.send_and_wait(dlq_topic(topic), value=body, key=key)
             log.error("consumer.dead_lettered", dlq=dlq_topic(topic), error=error[:500])

@@ -15,7 +15,9 @@ from app.orchestrator.safe_eval import UnsafeExpressionError, compile_expression
 from app.orchestrator.schemas import CONFIG_MODELS, NODE_TYPES, ValidationIssue
 
 
-def _issue(code: str, message: str, node_id: str | None = None, edge_id: str | None = None) -> ValidationIssue:
+def _issue(
+    code: str, message: str, node_id: str | None = None, edge_id: str | None = None
+) -> ValidationIssue:
     return ValidationIssue(node_id=node_id, edge_id=edge_id, code=code, message=message)
 
 
@@ -51,7 +53,11 @@ def validate_definition(definition: dict) -> list[ValidationIssue]:
             for err in exc.errors():
                 loc = ".".join(str(p) for p in err["loc"]) or "config"
                 issues.append(_issue("invalid_config", f"{ntype} config '{loc}': {err['msg']}", node_id=nid))
-        if ntype == "condition" and isinstance(config.get("expression"), str) and config["expression"].strip():
+        if (
+            ntype == "condition"
+            and isinstance(config.get("expression"), str)
+            and config["expression"].strip()
+        ):
             try:
                 compile_expression(config["expression"])
             except UnsafeExpressionError as exc:
@@ -60,7 +66,9 @@ def validate_definition(definition: dict) -> list[ValidationIssue]:
     starts = [nid for nid, n in nodes.items() if n["type"] == "start"]
     ends = [nid for nid, n in nodes.items() if n["type"] == "end"]
     if len(starts) != 1:
-        issues.append(_issue("start_count", f"workflow must have exactly one start node (found {len(starts)})"))
+        issues.append(
+            _issue("start_count", f"workflow must have exactly one start node (found {len(starts)})")
+        )
     if not ends:
         issues.append(_issue("missing_end", "workflow must have at least one end node"))
 
@@ -88,27 +96,51 @@ def validate_definition(definition: dict) -> list[ValidationIssue]:
             issues.append(_issue("self_loop", "edge connects a node to itself", node_id=src, edge_id=eid))
             continue
         if nodes[src]["type"] == "end":
-            issues.append(_issue("end_has_outgoing", "end node cannot have outgoing edges", node_id=src, edge_id=eid))
+            issues.append(
+                _issue("end_has_outgoing", "end node cannot have outgoing edges", node_id=src, edge_id=eid)
+            )
         if nodes[tgt]["type"] == "start":
-            issues.append(_issue("start_has_incoming", "start node cannot have incoming edges", node_id=tgt, edge_id=eid))
+            issues.append(
+                _issue(
+                    "start_has_incoming", "start node cannot have incoming edges", node_id=tgt, edge_id=eid
+                )
+            )
         handle = e.get("source_handle")
         if nodes[src]["type"] == "condition" and handle not in ("true", "false"):
-            issues.append(_issue("condition_handle", "condition edges must use source_handle 'true' or 'false'",
-                                 node_id=src, edge_id=eid))
+            issues.append(
+                _issue(
+                    "condition_handle",
+                    "condition edges must use source_handle 'true' or 'false'",
+                    node_id=src,
+                    edge_id=eid,
+                )
+            )
         adj[src].append(tgt)
         out_handles[src].append(handle)
 
     for nid, n in nodes.items():
         if n["type"] != "end" and not adj.get(nid):
-            issues.append(_issue("no_outgoing_edge", "non-end node must have at least one outgoing edge", node_id=nid))
+            issues.append(
+                _issue("no_outgoing_edge", "non-end node must have at least one outgoing edge", node_id=nid)
+            )
         if n["type"] == "condition":
             hs = out_handles.get(nid, [])
             if hs.count("true") != 1 or hs.count("false") != 1:
-                issues.append(_issue("condition_branches",
-                                     "condition node needs exactly one 'true' and one 'false' edge", node_id=nid))
+                issues.append(
+                    _issue(
+                        "condition_branches",
+                        "condition node needs exactly one 'true' and one 'false' edge",
+                        node_id=nid,
+                    )
+                )
         elif n["type"] != "end" and len(adj.get(nid, [])) > 1:
-            issues.append(_issue("multiple_outgoing",
-                                 "only condition nodes may branch (parallel fan-out is not supported)", node_id=nid))
+            issues.append(
+                _issue(
+                    "multiple_outgoing",
+                    "only condition nodes may branch (parallel fan-out is not supported)",
+                    node_id=nid,
+                )
+            )
 
     if len(starts) == 1:
         reachable = {starts[0]}
@@ -124,8 +156,11 @@ def validate_definition(definition: dict) -> list[ValidationIssue]:
 
     cycle_node = _find_cycle(nodes.keys(), adj)
     if cycle_node is not None:
-        issues.append(_issue("cycle_detected", "workflow contains a cycle (loops are not supported)",
-                             node_id=cycle_node))
+        issues.append(
+            _issue(
+                "cycle_detected", "workflow contains a cycle (loops are not supported)", node_id=cycle_node
+            )
+        )
     return issues
 
 

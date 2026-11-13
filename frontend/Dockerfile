@@ -10,7 +10,7 @@ ARG PNPM_VERSION=12.18.0
 RUN npm install -g pnpm@${PNPM_VERSION} && pnpm config set store-dir /pnpm/store
 
 # Install dependencies first (cached layer)
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --frozen-lockfile
 

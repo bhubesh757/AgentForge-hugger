@@ -95,15 +95,19 @@ class DbRuntimeContext:
             await append_event(session, self._execution_uuid, event_type, payload, node_id=node_id)
             await session.commit()
         if event_type.startswith("node.") and self._envelope is not None:
-            await _publish_lifecycle(self._envelope, "workflow.node." + event_type.split(".", 1)[1],
-                                     {"node_id": node_id, **payload})
+            await _publish_lifecycle(
+                self._envelope,
+                "workflow.node." + event_type.split(".", 1)[1],
+                {"node_id": node_id, **payload},
+            )
 
     async def get_chat_model(self, provider_id: str | None, model: str | None) -> Any:
         from app.llm.manager import get_chat_model  # type: ignore[import-not-found]
 
         async with self.session_factory() as session:
-            return await get_chat_model(session, self._org_uuid,
-                                        _uuid(provider_id) if provider_id else None, model)
+            return await get_chat_model(
+                session, self._org_uuid, _uuid(provider_id) if provider_id else None, model
+            )
 
     async def load_agent(self, agent_id: str, version: int | None) -> AgentSpec:
         from sqlalchemy import select
@@ -117,18 +121,28 @@ class DbRuntimeContext:
             ver = version or _get(agent, "current_version", "version", default=None)
             row = None
             if ver is not None:
-                row = (await session.execute(select(AgentVersion).where(
-                    AgentVersion.agent_id == agent.id, AgentVersion.version == ver))).scalar_one_or_none()
+                row = (
+                    await session.execute(
+                        select(AgentVersion).where(
+                            AgentVersion.agent_id == agent.id, AgentVersion.version == ver
+                        )
+                    )
+                ).scalar_one_or_none()
             src = row if row is not None else agent
             tools: list[dict] = []
             for tid in _get(src, "tool_ids", "tools", default=[]) or []:
                 tool = await session.get(Tool, _uuid(tid if not isinstance(tid, dict) else tid["id"]))
                 if tool is None or str(tool.organization_id) != self.organization_id:
                     continue
-                tools.append({"id": str(tool.id), "name": _safe_tool_name(tool.name),
-                              "description": _get(tool, "description", default="") or "",
-                              "input_schema": _get(tool, "input_schema", default=None),
-                              "version": _get(tool, "current_version", default=None)})
+                tools.append(
+                    {
+                        "id": str(tool.id),
+                        "name": _safe_tool_name(tool.name),
+                        "description": _get(tool, "description", default="") or "",
+                        "input_schema": _get(tool, "input_schema", default=None),
+                        "version": _get(tool, "current_version", default=None),
+                    }
+                )
             provider = _get(src, "provider_id", "llm_provider_id")
             return AgentSpec(
                 instructions=_get(src, "instructions", "system_prompt", default="") or "",
@@ -143,10 +157,13 @@ class DbRuntimeContext:
             raise RuntimeError("tool execution requires the sandboxed tool-worker (EXECUTION_DISPATCH=kafka)")
         request_id = str(uuid.uuid4())
         env = EventEnvelope(
-            event_type=TOOL_EXECUTION_REQUESTED, organization_id=self._org_uuid,
+            event_type=TOOL_EXECUTION_REQUESTED,
+            organization_id=self._org_uuid,
             execution_id=self._execution_uuid,
             correlation_id=self._envelope.correlation_id if self._envelope else uuid.uuid4(),
-            resource_type="tool", resource_id=_uuid(tool_id), resource_version=int(version or 0),
+            resource_type="tool",
+            resource_id=_uuid(tool_id),
+            resource_version=int(version or 0),
             kind=self._envelope.kind if self._envelope else "workflow",
             payload={"request_id": request_id, "input": payload, "tool_version": version},
         )
@@ -169,13 +186,22 @@ class DbRuntimeContext:
         async with self.session_factory() as session:
             embeddings = await get_embeddings(session, self._org_uuid)
             vector = await embeddings.aembed_query(query)
-            stmt = (select(DocumentChunk, DocumentChunk.embedding.cosine_distance(vector).label("distance"))
-                    .where(DocumentChunk.organization_id == self._org_uuid)
-                    .order_by("distance").limit(top_k))
+            stmt = (
+                select(DocumentChunk, DocumentChunk.embedding.cosine_distance(vector).label("distance"))
+                .where(DocumentChunk.organization_id == self._org_uuid)
+                .order_by("distance")
+                .limit(top_k)
+            )
             rows = (await session.execute(stmt)).all()
-        return [{"content": _get(c, "content", "text", default=""), "score": round(1 - float(d), 4),
-                 "metadata": _get(c, "metadata_", "meta", default={}) or {},
-                 "document_id": str(_get(c, "document_id", default="")) or None} for c, d in rows]
+        return [
+            {
+                "content": _get(c, "content", "text", default=""),
+                "score": round(1 - float(d), 4),
+                "metadata": _get(c, "metadata_", "meta", default={}) or {},
+                "document_id": str(_get(c, "document_id", default="")) or None,
+            }
+            for c, d in rows
+        ]
 
     async def resolve_credential(self, ref: str) -> dict[str, str]:
         # Contract §17: app.credentials.service.resolve_credential(session, org_id, credential_id)
@@ -218,9 +244,14 @@ async def _load_definition(session, execution: Any) -> dict:
 
         from app.database.models import WorkflowVersion  # type: ignore[import-not-found]
 
-        row = (await session.execute(select(WorkflowVersion).where(
-            WorkflowVersion.workflow_id == execution.resource_id,
-            WorkflowVersion.version == execution.resource_version))).scalar_one_or_none()
+        row = (
+            await session.execute(
+                select(WorkflowVersion).where(
+                    WorkflowVersion.workflow_id == execution.resource_id,
+                    WorkflowVersion.version == execution.resource_version,
+                )
+            )
+        ).scalar_one_or_none()
         if row is None:
             raise RuntimeError("workflow version not found")
         return row.definition
@@ -230,7 +261,7 @@ async def _load_definition(session, execution: Any) -> dict:
 
 
 async def _checkpointer():
-    """MemorySaver by default; Postgres saver when LANGGRAPH_CHECKPOINTER=postgres and the extra is installed."""
+    """MemorySaver by default; Postgres saver if LANGGRAPH_CHECKPOINTER=postgres (extra installed)."""
     if str(get_setting("LANGGRAPH_CHECKPOINTER", "memory")).lower() == "postgres":
         try:
             from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore[import-not-found]
@@ -247,8 +278,9 @@ async def _checkpointer():
     return MemorySaver(), None
 
 
-async def run_execution(execution_id: uuid.UUID, envelope: EventEnvelope | None = None,
-                        session_factory: Any = None) -> None:
+async def run_execution(
+    execution_id: uuid.UUID, envelope: EventEnvelope | None = None, session_factory: Any = None
+) -> None:
     """Run one queued execution to a terminal state. Idempotent: non-queued executions are skipped."""
     from app.executions.events import append_event, set_status  # type: ignore[import-not-found]
 
@@ -293,32 +325,50 @@ async def run_execution(execution_id: uuid.UUID, envelope: EventEnvelope | None 
     try:
         graph = compile_workflow(definition, ctx, checkpointer=saver)
         final = await asyncio.wait_for(
-            graph.ainvoke({"input": state_input, "last_output": state_input, "outputs": {},
-                           "execution_id": str(execution_id), "organization_id": ctx.organization_id,
-                           "trace": []},
-                          config={"configurable": {"thread_id": str(execution_id)}, "recursion_limit": 100}),
-            timeout=timeout)
-        await _finish(session_factory, execution, "succeeded", output=final.get("last_output"),
-                      trace=final.get("trace"))
+            graph.ainvoke(
+                {
+                    "input": state_input,
+                    "last_output": state_input,
+                    "outputs": {},
+                    "execution_id": str(execution_id),
+                    "organization_id": ctx.organization_id,
+                    "trace": [],
+                },
+                config={"configurable": {"thread_id": str(execution_id)}, "recursion_limit": 100},
+            ),
+            timeout=timeout,
+        )
+        await _finish(
+            session_factory, execution, "succeeded", output=final.get("last_output"), trace=final.get("trace")
+        )
         await _publish_lifecycle(envelope, AGENT_EXECUTION_COMPLETED, {})
     except ExecutionCancelled:
         await _finish(session_factory, execution, "cancelled")
     except TimeoutError:
-        await _finish(session_factory, execution, "failed", error=f"execution timed out after {int(timeout)}s")
+        await _finish(
+            session_factory, execution, "failed", error=f"execution timed out after {int(timeout)}s"
+        )
         await _publish_lifecycle(envelope, AGENT_EXECUTION_FAILED, {"error": "timeout"})
     except Exception as exc:  # noqa: BLE001
         err = str(exc)[:4000]
         log.exception("runtime.execution_failed")
-        await _finish(session_factory, execution, "failed", error=err,
-                      node_id=getattr(exc, "node_id", None))
+        await _finish(session_factory, execution, "failed", error=err, node_id=getattr(exc, "node_id", None))
         await _publish_lifecycle(envelope, AGENT_EXECUTION_FAILED, {"error": err})
     finally:
         if cm is not None:
             await cm.__aexit__(None, None, None)
 
 
-async def _finish(session_factory, execution: Any, status: str, *, output: Any = None, error: str | None = None,
-                  node_id: str | None = None, trace: list | None = None) -> None:
+async def _finish(
+    session_factory,
+    execution: Any,
+    status: str,
+    *,
+    output: Any = None,
+    error: str | None = None,
+    node_id: str | None = None,
+    trace: list | None = None,
+) -> None:
     from app.executions.events import append_event, set_status  # type: ignore[import-not-found]
 
     async with session_factory() as session:
@@ -328,8 +378,9 @@ async def _finish(session_factory, execution: Any, status: str, *, output: Any =
             payload.update(output=_jsonable(output), trace=trace or [])
         elif error:
             payload.update(error=error, node_id=node_id)
-        await append_event(session, execution.id, f"execution.{'completed' if status == 'succeeded' else status}",
-                           payload)
+        await append_event(
+            session, execution.id, f"execution.{'completed' if status == 'succeeded' else status}", payload
+        )
         if status == "succeeded" and str(execution.kind) == "chat":
             await _write_chat_message(session, execution, output)
         await session.commit()
@@ -338,7 +389,6 @@ async def _finish(session_factory, execution: Any, status: str, *, output: Any =
 
 async def _write_chat_message(session, execution: Any, output: Any) -> None:
     from app.database.models import ChatMessage  # type: ignore[import-not-found]
-
     from app.messaging.dispatch import model_kwargs
 
     session_id = _get(execution, "chat_session_id", "session_id")
@@ -348,8 +398,18 @@ async def _write_chat_message(session, execution: Any, output: Any) -> None:
         log.warning("runtime.chat_session_unknown")
         return
     content = output if isinstance(output, str) else json.dumps(output, default=str)
-    session.add(ChatMessage(**model_kwargs(ChatMessage, id=uuid.uuid4(), session_id=_uuid(session_id),
-                                           role="assistant", content=content, execution_id=execution.id)))
+    session.add(
+        ChatMessage(
+            **model_kwargs(
+                ChatMessage,
+                id=uuid.uuid4(),
+                session_id=_uuid(session_id),
+                role="assistant",
+                content=content,
+                execution_id=execution.id,
+            )
+        )
+    )
 
 
 def _jsonable(value: Any) -> Any:

@@ -56,19 +56,21 @@ def build_outbox_row(execution: Any, topic: str, env: EventEnvelope):
     from app.database.models import OutboxEvent  # type: ignore[import-not-found]
 
     payload = env.model_dump(mode="json")
-    return OutboxEvent(**model_kwargs(
-        OutboxEvent,
-        id=uuid.uuid4(),
-        topic=topic,
-        key=str(execution.id),
-        event_id=env.event_id,
-        event_type=env.event_type,
-        aggregate_id=execution.id,
-        execution_id=execution.id,
-        organization_id=execution.organization_id,
-        payload=payload,
-        attempts=0,
-    ))
+    return OutboxEvent(
+        **model_kwargs(
+            OutboxEvent,
+            id=uuid.uuid4(),
+            topic=topic,
+            key=str(execution.id),
+            event_id=env.event_id,
+            event_type=env.event_type,
+            aggregate_id=execution.id,
+            execution_id=execution.id,
+            organization_id=execution.organization_id,
+            payload=payload,
+            attempts=0,
+        )
+    )
 
 
 async def enqueue_execution(session, execution: Any) -> None:
