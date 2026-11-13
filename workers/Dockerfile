@@ -5,7 +5,7 @@
 #   python -m workers.agent_worker | python -m workers.workflow_worker | python -m workers.tool_worker
 
 ARG PYTHON_VERSION=3.12
-FROM ghcr.io/astral-sh/uv:0.12.5 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8 AS uv
 
 FROM python:${PYTHON_VERSION}-slim AS builder
 COPY --from=uv /uv /usr/local/bin/uv
