@@ -28,7 +28,7 @@ COPY . .
 RUN pnpm build
 
 # ---------------------------------------------------------------------------
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 LABEL org.opencontainers.image.title="agentforge-ai-frontend" \
       org.opencontainers.image.source="https://github.com/OWNER/agentforge-ai" \
       org.opencontainers.image.licenses="MIT"
