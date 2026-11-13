@@ -3,7 +3,7 @@
 #   docker build -f backend/Dockerfile -t agentforge-ai-backend .
 
 ARG PYTHON_VERSION=3.12
-FROM ghcr.io/astral-sh/uv:0.12.5 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.8 AS uv
 
 # ---------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
